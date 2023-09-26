@@ -1,88 +1,190 @@
 from dotenv import load_dotenv
+import json
+from pydantic import BaseModel, Field
+from typing import List,Dict
+import guardrails as gd
 import guidance
-
+import openai
 load_dotenv()
 
-guidance.llm = guidance.llms.OpenAI(model="gpt-3.5-turbo")
+guidance.llm = guidance.llms.OpenAI(model="gpt-4")
 
-
+#For First Endpoint
 class GuidancePrompt():
    
     base_prompt = '''
         {{#system~}}
-        Your task is to be help me improve my English proficiency by conversing to me about my interests or you try to initiate conversation that is outside my interest, while teaching me about the English language.
-        You must strictly follow the grammatical rules while having a conversation with me. 
-        To make our discussion more conversational ask me one question at a time and make sure to end your sentence with a question to have a back-and-forth conversation between you and me.
-        You must also correct my grammatical errors if there is any and praise me if there is no errors.
+        I want you to act as a spoken and multilingual AI English teacher. 
         {{~/system}}
 
         {{#user~}}
-        Your task is to be help me improve my English proficiency by conversing to me about my interests or you try to initiate conversation that is outside my interest, while teaching me about the English language.
-        You must strictly follow the grammatical rules while having a conversation with me. 
-        To make our discussion more conversational ask me one question at a time and make sure to end your sentence with a question to have a back-and-forth conversation between you and me.
-        You must also correct my grammatical errors if there is any and praise me if there is no errors.
+        I want you to help me improve my usage of the english language. Check my use of grammar for each of my messages every single time
+        Always remember the following information about me:
+        My name is {{name}}, My level of proficiency in english is at a {{proficiency}} level and my native language is {{language}}
+        Your response should always be in a JSON format specified below within the triple backticks
+        The JSON response should contain either your praise or corrections depnding on the use of grammar for the part of the message I specifally asked you to analyzed
 
-        Some of the example of grammatical errors are delimeted with triple backticks:
-        ```
-        - "She not went to the market."
-        - "They don't likes pizza."
-        - "She plays soccer good."
-        - "Me and him are best friends."
-        - "The book is more interestinger than the movie."
-        - "He runned really fast."
-        - "She sings gooder than him."
-        - "I'm not hungry, so I don't needs dinner."
-        - "We was going to the beach tomorrow."
-        - "They was at the concert last night."
-        ```
-        For each of your response you must reply in english with the corresponding user's native language as well.
-        Some of the examples are delimited with triple backticks:
-        ```
-        1) When language is Korean:'Hello, I am your AI chatbot. How can I help you today? 안녕하세요, 인공지능 챗봇입니다. 오늘은 무엇을 도와드릴까요?'
-        2) When language is Filipino: 'Hello, I am your AI chatbot. How can I help you today? Kamusta, ako ang iyong AI chatbot. Paano kita matutulungan ngayon?'
-        3) When language is German: 'Hello, I am your AI chatbot. How can I help you today? Hallo, ich bin Ihr KI-Chatbot. Wie kann ich Ihnen heute helfen?'
-        ```
-
-        Finally, always be on alert on correcting the grammar of my input if there is a grammatical errors on my input follow this format that is delimited with backticks.
-        ```
-        English: "<Response in English Text>", Translated: "<Response in user's native langage Text>"
-        {{~/user}} 
-
-        {{#assistant~}}
-        Ok got this
-        {{~/assistant}}
-
-        '''
-      
-
-
-    def __init__(self,role : str,content :str):
-        self.role = role
-        self.content = content
-
-    def return_model_response(self):
-        concate= ''
+        {{~! Analyze my message for any and all grammatical errors ~}}
         
-        if self.role == 'User':
-            concate = '''       
-        {{#user~}}
-        {{query}}
+        Make sure that the message also contains correct punctuation, capitalization and other rules of grammar.
+        If there are any gramatical errors you should respond immediately with the correct grammar only,
+        If there are none you should praise me and continue the conversation with a question to keep the conversation alive
+        And of course make sure to add a question to keep the conversation active
+
+        Lastly format your response so that it is followed by a direct translation to my native language of {{language}}
+        Be alert always on making corrections from my input and on responding to me with a JSON format delimited with triple backticks: 
+        ```\{\{"content": "<Response in English Text>", "translation": "<Response Translated to {{language}} Text>"\}\}```
+        
+        Start with my next message "Hello, {{name}}! Im Lex, your English AI Tutor. I'm here to help you learn English easily and fun. For starter/ To get started, what topic would you like to talk about?"
+        Remember always that You should always check my grammar for each and everyone of my message and to praise/correct me accordingly.
+
+        After your initial JSON response look back at the english part of your response and
+        then from that response take 4 words to structure in the JSON format as structured below.
+        response and use it in another JSON format as structured below
+        
+        Your response should always be in a JSON format structured like this:
+
+        \[
+            "Word1": \{
+                "context-usage": "<insert statement which articulate the specific context usage of the word>",
+                "definition": "<insert definition of the word>",
+                "1st-example": "<Provide specific beginner use-case example of the word>",
+                "2nd-example": "<Provide specific {{proficiency}} use-case example of the word>",
+                "3rd-example": "<Provide specific {{proficiency}} use-case example of the word>"
+            \},
+            "Word2": \{
+                "context-usage": "<insert statement which articulate the specific context usage of the word>",
+                "definition": "<insert definition of the word>",
+                "1st-example": "<Provide specific beginner use-case example of the word>",
+                "2nd-example": "<Provide specific {{proficiency}} use-case example of the word>",
+                "3rd-example": "<Provide specific {{proficiency}} use-case example of the word>"
+            \},
+        \]
         {{~/user}}
 
-        {{#assistant~}}
-        {{gen 'reply'}}
-        {{~/assistant}}
-            '''
-        elif self.role == 'Assistant':
-            concate = '''
-        {{#assistant~}}
-        {{query}}
-        {{~/assistant}}
-            '''
-        final_prompt_string = self.base_prompt + f"{concate}"
+        {{~! Iterate over each message in the message_history recieved from the [ET_APP_REQUEST] ~}}
+        {{~#each message_history}}
+        {{#if this.sender == "user"}}
+        {{#user~}}{{this.content}}{{~/user}}
+        {{else}}
+        {{#assistant~}}{{this.content}}{{~/assistant}}                 
+        {{/if}}
+        {{~/each}}
 
-        model_response = guidance(final_prompt_string)
-        prompt = self.content
-        response = model_response(query=prompt)
-        return  response["reply"]
+        {{~! Now that the model is provided with the whole context of conversation, it is now time to provided its response ~}}                  
+        {{#assistant~}}
+        {{gen 'response'}}
+        {{~/assistant}}
+        
+        '''
+    model_response = guidance(base_prompt)
+    
+    def __init__(self, message_history:List[dict],name : str , language :str , proficiency : str):
+        self.message_history = message_history
+
+    def return_model_response(self):
+        prompt= self.message_history
+        model_response = self.model_response(message_history=prompt,name="Joe",proficiency="Beginner",language="Filipino")
+        return model_response['response']
+
+
+#For Translation
+class Generated(BaseModel):
+    message: str = Field(description="Simply copy the message here")
+    translated: str =Field(description="Translate the message into the user's native language")
+class Assistant(BaseModel):
+    translation: List[Generated]
+
+#For Vocab
+#Note sobrang tagal pag kasama examples nag titimeout siya. If context_usage and definition lang gumagana.
+#Di ko magawa yung format as is, In guardrails bawal mag generate ng key yung lamang lang pwede.
+class Words(BaseModel):
+    word : str = Field(description="Chosen Word")
+    context_usage : str = Field(description="insert statement which articulate the specific context usage of the word")
+    definition : str = Field(description="insert definition of the word")
+    first_example : str = Field(description="Provide specific beginner use-case example of the word")
+    second_example : str = Field(description="Provide specific use-case example of the word based off user's proficiency")
+    third_example : str = Field(description="Provide specific use-case example of the word based off user's proficiency")
+class Vocab(BaseModel):
+    sender :str = Field(description="Copy the Sender here")
+    vocab: List[Words]
+
+
+
+#For 2nd and third endpoint.
+class GuardRail():
+
+    translate_prompt ='''
+    You are a AI translator that will help the user to enhance his/her ${proficeincy} english proficiency. \
+    You will translate the given message into ${language}, keep in mind ${language} is the user's native language.
+
+    ${message}
+
+    ${gr.xml_prefix_prompt}
+
+    ${output_schema}
+    
+    '''
+
+
+    vocab_prompt ='''
+    You are a AI english tutor that is tasked to increase the user's english proficiency. \
+    And I need you to take 4 words from the message that is delimeted by triple backtics.\
+    And explain the words so that the user can understand it further to increase english proficiency. \
+    Remember the sender is : ${sender}. \
+    ```
+    ${message}
+    ```
+
+    ${gr.xml_prefix_prompt}
+
+    ${output_schema}
+    
+    '''
+    def __init__(self, message: str,proficiency:str, language:str = None, sender: str = None):
+        self.message = message
+        self.language = language
+        self.proficiency = proficiency
+        self.sender = sender
+
+    #Translation
+    def translate(self):
+        response = self.guardrail_translate(prompt=self.message,
+                                  language=self.language,
+                                  proficiency=self.proficiency,
+                                  template=self.translate_prompt,
+                                  output=Assistant)
+        return response
+    
+    def guardrail_translate(self,prompt,language,proficiency,template,output):
+        guard = gd.Guard.from_pydantic(output_class=output, prompt=template)
+        raw_llm_output, validated_output = guard(
+            openai.ChatCompletion.create,
+            prompt_params={"message":prompt,"language":language,"proficiency":proficiency},
+            model="gpt-4-0613",
+            max_tokens=2048,
+            temperature=0,
+        )
+        return validated_output
+    
+    #Vocab
+    def vocab(self):
+        response = self.guardrail_vocab(prompt=self.message,
+                                  proficiency=self.proficiency,
+                                  sender=self.sender,
+                                  template=self.vocab_prompt,
+                                  output=Vocab)
+        return response
+    
+    def guardrail_vocab(self,prompt,sender,proficiency,template,output):
+        guard = gd.Guard.from_pydantic(output_class=output, prompt=template)
+        raw_llm_output, validated_output = guard(
+            openai.ChatCompletion.create,
+            prompt_params={"message":prompt,"sender":sender,"proficiency":proficiency},
+            model="gpt-4-0613",
+            max_tokens=2048,
+            temperature=0,
+        )
+        return validated_output
+
         
