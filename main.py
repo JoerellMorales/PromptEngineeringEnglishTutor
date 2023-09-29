@@ -2,12 +2,25 @@ from fastapi import FastAPI,HTTPException,status
 
 import uvicorn
 from pydantic import BaseModel,Field
+from fastapi.responses import FileResponse
 from chatbot import GuidancePrompt,GuardRail
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import guidance
 import json
 from typing import List,Dict
+import torch
+import torchaudio
+from seamless_communication.models.inference import Translator
+from m4t_module import ContentToTransform
+
+
+translator = Translator(
+    "seamlessM4T_medium",
+    "vocoder_36langs",
+    torch.device("cuda:0"),
+    torch.float16
+)
 
 load_dotenv()
 
@@ -41,6 +54,10 @@ class Vocab(BaseModel):
     content : str
     proficiency : str
 
+class TranslateAndToSpeech(BaseModel):
+    content: str
+    language: str
+
 @app.get("/")
 async def root():
     return {"message": "Hello World"}
@@ -70,6 +87,22 @@ async def generate_vocab(message:Vocab):
                          sender=message.sender)
     
     return prompt.vocab()
+
+###### M4T Implementation Endpoints #######
+@app.post("/translateM4t",status_code=status.HTTP_202_ACCEPTED)
+async def translate_m4t(message:TranslateAndToSpeech):
+    user_text = ContentToTransform(content=message.content,
+                                   language=message.language)
+
+    return user_text.to_translate(model=translator)
+
+
+@app.post("/ttsM4t",status_code=status.HTTP_202_ACCEPTED)
+async def tts(message:TranslateAndToSpeech):
+    user_text = ContentToTransform(content=message.content,
+                                   language=message.language)
+    path = user_text.to_speech(model=translator)
+    return FileResponse(path=path)
 
 if __name__ == '__main__':
     uvicorn.run(app, host='0.0.0.0', port=8000)
